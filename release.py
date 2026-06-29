@@ -125,7 +125,7 @@ def remove_at_bounds(particle, fieldset, time):
 #%%
 
 def run_experiment(year, month, day, hour, minute,days_simulation, wind_coeff, inner_dt, output_dt, dt_release,
-                   output_file, antibeachingfile, lon_particles, lat_particles):
+                   output_file, landmaskfile, lon_particles, lat_particles):
     
 
     print(f'Starting simulation: {day}-{month}-{year} at {hour}:{minute}')
@@ -211,7 +211,7 @@ def run_experiment(year, month, day, hour, minute,days_simulation, wind_coeff, i
     """
     LANDMASK FIELD
     """
-    filenames_landmask = {'landmask': antibeachingfile}
+    filenames_landmask = {'landmask':landmaskfile}
     dimensions_landmask = {'lat': 'lat',
                                 'lon': 'lon'}
 
@@ -374,11 +374,11 @@ plt.show()
 
 #%%
 
-antibeachingfile='anti_beaching_NWES_2d.nc'
+landmaskfile='NWES_landmask.nc'
 
 output_file= f'output/{release}/{release}_{day0}-{month}-{year}_wind{wind_coeff}_{days_simulation}days.zarr'
 
 run_experiment(year=year,month=month, day=day0, hour=0, minute=0, wind_coeff=wind_coeff,
                 days_simulation=days_simulation, inner_dt=inner_dt, output_dt=output_dt, dt_release=release_dt,
-                output_file=output_file, antibeachingfile=antibeachingfile, lon_particles=lon_particles, lat_particles=lat_particles)
+                output_file=output_file, landmaskfile=landmaskfile, lon_particles=lon_particles, lat_particles=lat_particles)
 #%%
