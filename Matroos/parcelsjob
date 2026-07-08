@@ -1,0 +1,12 @@
+#!/bin/bash -l
+#
+#SBATCH -J parcels              # name of job
+#SBATCH -t 8:00:00            # time in hh:mm:ss
+#SBATCH -n 1                  # number of cores for job, SLURM automatically determines how many nodes are needed
+#SBATCH -o log.%j.o     # file for standard output will -  %j is jobid determined by SLURM
+#SBATCH -e log.%j.e     # file for potential errors will
+#SBATCH -p normal
+
+cd /nethome/sebil001/Drifter_campaign_prediction/Matroos
+cat run_dcsm7.py
+pixi run python -u run_dcsm7.py
