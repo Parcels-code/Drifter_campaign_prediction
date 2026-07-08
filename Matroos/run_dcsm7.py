@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 import matplotlib.tri as mtri
 import uxarray as ux
@@ -8,7 +9,8 @@ import uxarray as ux
 import parcels
 
 #%% Open files
-files = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmoby/maps2d_dcsm7_harmonie_2025*.nc"
+files = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_2025*.nc"
+# TODO also add waves ("swan_dcsm_harmony"?)
 
 def drop_analysis_time(d):
     # works whether analysis_time is a coord or variable
@@ -148,8 +150,11 @@ time = (
 )
 pset = parcels.ParticleSet(fieldset, x=lon, y=lat, time=time)
 
+slurm_job_id = os.getenv("SLURM_JOB_ID", "local")
+output_name = f"output-matroos-{slurm_job_id}.parquet"
+
 output_file = parcels.ParticleFile(
-    "output-matroos.parquet",
+    output_name,
     outputdt=np.timedelta64(30, "m"),
     mode="w",
 )
