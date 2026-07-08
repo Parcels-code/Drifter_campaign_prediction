@@ -2,6 +2,10 @@
 **.parquet**
 **.nc**
 **.DS_Store
+**.gif
+**.mp4
+log.*.e
+log.*.o
 
 # pixi environments
 .pixi/*
