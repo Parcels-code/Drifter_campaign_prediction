@@ -148,7 +148,8 @@ time = (
     np.broadcast_to(time_i, (nrepeat, npart))
     + np.arange(0, nrepeat)[:, np.newaxis] * release_dt
 )
-pset = parcels.ParticleSet(fieldset, x=lon, y=lat, time=time)
+print(f"Running {nrepeat} releases of {npart} particles each, for a total of {nrepeat*npart} particles.")
+pset = parcels.ParticleSet(fieldset, x=lon, y=lat, t=time)
 
 slurm_job_id = os.getenv("SLURM_JOB_ID", "local")
 output_name = f"output-matroos-{slurm_job_id}.parquet"
