@@ -87,3 +87,8 @@ pset.execute(
     dt=np.timedelta64(10, "m"),
     output_file=output_file,
 )
+
+#%% Make an animation of the particle trajectories
+print("Making animation...")
+anim = make_animation(output_name)
+print(f"Animation saved to {anim}.")
