@@ -1,17 +1,20 @@
-import xarray as xr
-import numpy as np
-import matplotlib.pyplot as plt
 import os
+import psutil
 
-import matplotlib.tri as mtri
+import numpy as np
+import xarray as xr
 import uxarray as ux
 
 import parcels
+from parcels.interpolators._base import VectorInterpolator
+
+from make_animation import make_animation, make_plot
 
 #%% Open files
-files = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr"
+input_file = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr"
 # TODO also add waves ("swan_dcsm_harmony"?)
-ds = parcels.open_raw_zarr(files)
+
+ds = parcels.open_raw_zarr(input_file)
 
 uxgrid = ux.Grid.from_topology(
     node_lon=ds["Mesh_node_x"],
@@ -27,8 +30,31 @@ uxds = ux.UxDataset(
     ),
     uxgrid=uxgrid,
 )
-fieldset = parcels.FieldSet.from_ugrid_conventions(uxds, mesh="spherical")
+
+# NOTE we need to run with flat mesh beacuse spherical mesh assumes global grid, making morton indexing very slow.
+# Joe is workign on a fix. Speedup can be a factor 30!
+fieldset = parcels.FieldSet.from_ugrid_conventions(uxds, mesh="flat")
+
+class Ux_Velocity_Conversion_On_FlatGrid(VectorInterpolator):  # noqa: N801
+    """Interpolation kernel for Vectorfields of velocity on a UxGrid."""
+
+    def interp(
+        self,
+        particle_positions: dict[str, float | np.ndarray],
+        grid_positions: dict[_UXGRID_AXES, dict[str, int | float | np.ndarray]],
+        vectorfield: VectorField,
+    ):
+        u = vectorfield.U.interp_method.interp(particle_positions, grid_positions, vectorfield.U)
+        v = vectorfield.V.interp_method.interp(particle_positions, grid_positions, vectorfield.V)
+        u /= 1852 * 60 * np.cos(np.deg2rad(particle_positions["y"]))
+        v /= 1852 * 60
+        w = np.zeros_like(u)
+        return u, v, w
+
+fieldset.UV.interp_method = Ux_Velocity_Conversion_On_FlatGrid()
+
 fieldset.describe()
+fieldset.to_windowed_arrays()
 
 #%% Create the simulation
 release = 'coast'  # 'coast' or 'off_shore'
@@ -36,11 +62,9 @@ release = 'coast'  # 'coast' or 'off_shore'
 if release=='off_shore':
     lat0 = 52.10
     lon0 = 3.52
-    day0=5
 elif release=='coast':
     lat0 = 52.020000
     lon0 = 4.097500
-    day0=19
 
 radii = [100, 200, 400, 800, 1600]  # m
 n_points = 16
@@ -71,9 +95,10 @@ pset = parcels.ParticleSet(fieldset, x=lon, y=lat, t=time)
 slurm_job_id = os.getenv("SLURM_JOB_ID", "local")
 output_name = f"output-matroos-{slurm_job_id}.parquet"
 
+outputdt = np.timedelta64(30, "m")  # output every 30 minutes
 output_file = parcels.ParticleFile(
     output_name,
-    outputdt=np.timedelta64(30, "m"),
+    outputdt=outputdt,
     mode="w",
 )
 
@@ -88,7 +113,10 @@ pset.execute(
     output_file=output_file,
 )
 
-#%% Make an animation of the particle trajectories
+#%% Make plot and animation of the particle trajectories
+print("Making plot...")
+anim = make_plot(output_name)
 print("Making animation...")
-anim = make_animation(output_name)
-print(f"Animation saved to {anim}.")
+anim = make_animation(output_name, time_step=outputdt)
+print("Animation saved")
+print("")
