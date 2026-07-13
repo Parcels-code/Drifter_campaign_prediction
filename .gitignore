@@ -8,6 +8,8 @@
 log.*.e
 log.*.o
 
+**/settings.json
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml
