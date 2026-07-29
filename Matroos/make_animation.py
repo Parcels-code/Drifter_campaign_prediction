@@ -12,6 +12,9 @@ def make_animation(file, time_step=np.timedelta64(30, "m")):
     df = parcels.read_particlefile(file)
 
     ds = parcels.open_raw_zarr("/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr")
+    ds = ds.isel(time=0, zc=0)
+    zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
+    ds = ds.isel(n_face=(~zero_faces).values)
 
     triang = mtri.Triangulation(
         ds["Mesh_node_x"].data,
@@ -116,6 +119,9 @@ def make_plot(file):
     df = parcels.read_particlefile(file)
 
     ds = parcels.open_raw_zarr("/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr")
+    ds = ds.isel(time=0, zc=0)
+    zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
+    ds = ds.isel(n_face=(~zero_faces).values)
 
     triang = mtri.Triangulation(
         ds["Mesh_node_x"].data,
