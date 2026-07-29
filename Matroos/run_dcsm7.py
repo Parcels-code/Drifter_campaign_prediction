@@ -11,7 +11,7 @@ from parcels.interpolators._base import VectorInterpolator
 from make_animation import make_animation, make_plot
 
 #%% Open files
-input_file = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr"
+input_file = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined_compressed.zarr"
 # TODO also add waves ("swan_dcsm_harmony"?)
 
 ds = parcels.open_raw_zarr(input_file)
@@ -31,27 +31,7 @@ uxds = ux.UxDataset(
     uxgrid=uxgrid,
 )
 
-# NOTE we need to run with flat mesh beacuse spherical mesh assumes global grid, making morton indexing very slow.
-# Joe is workign on a fix. Speedup can be a factor 30!
-fieldset = parcels.FieldSet.from_ugrid_conventions(uxds, mesh="flat")
-
-class Ux_Velocity_Conversion_On_FlatGrid(VectorInterpolator):  # noqa: N801
-    """Interpolation kernel for Vectorfields of velocity on a UxGrid."""
-
-    def interp(
-        self,
-        particle_positions: dict[str, float | np.ndarray],
-        grid_positions: dict[_UXGRID_AXES, dict[str, int | float | np.ndarray]],
-        vectorfield: VectorField,
-    ):
-        u = vectorfield.U.interp_method.interp(particle_positions, grid_positions, vectorfield.U)
-        v = vectorfield.V.interp_method.interp(particle_positions, grid_positions, vectorfield.V)
-        u /= 1852 * 60 * np.cos(np.deg2rad(particle_positions["y"]))
-        v /= 1852 * 60
-        w = np.zeros_like(u)
-        return u, v, w
-
-fieldset.UV.interp_method = Ux_Velocity_Conversion_On_FlatGrid()
+fieldset = parcels.FieldSet.from_ugrid_conventions(uxds, mesh="spherical")
 
 fieldset.describe()
 fieldset.to_windowed_arrays()
@@ -79,6 +59,7 @@ for r in radii:
     lat.extend(lat0 + dlat)
     lon.extend(lon0 + dlon)
 
+# lon, lat = [4.466334, 4.374861, 4.500730],[51.899910, 51.898599, 51.917959]
 release_dt = np.timedelta64(1, "h")
 nrepeat = 12
 npart = len(lon)
