@@ -1,5 +1,5 @@
 import os
-import psutil
+import glob
 
 import numpy as np
 import xarray as xr
@@ -11,8 +11,7 @@ from parcels.interpolators._base import VectorInterpolator
 from make_animation import make_animation, make_plot
 
 #%% Open files
-input_file = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined_compressed.zarr"
-# TODO also add waves ("swan_dcsm_harmony"?)
+input_file = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie_flow/maps2d_dcsm7_harmonie_combined_compressed.zarr"
 
 ds = parcels.open_raw_zarr(input_file)
 
@@ -33,15 +32,60 @@ uxds = ux.UxDataset(
 
 fieldset = parcels.FieldSet.from_ugrid_conventions(uxds, mesh="spherical")
 
+#%% Add Stokes drift to the fieldset
+files = sorted(
+    glob.glob(
+        "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie_waves/maps2d_swan_kuststrook_harmonie_202510*.nc"
+    )
+)
+
+ds = xr.open_mfdataset(
+    files,
+    combine="nested",
+    concat_dim="time",
+    data_vars="minimal",
+    coords="minimal",
+    compat="override",
+    join="override",
+    parallel=True,
+    chunks={"time": 1},
+)
+Us = 8 * np.pi**3 * ds["wave_height_hm0"]**2 / (ds["wave_period_tm10"]**3 * 9.81)
+ds["Us"] = Us * np.cos(ds["wave_dir_th0"] * np.pi / 180)
+ds["Vs"] = Us * np.sin(ds["wave_dir_th0"] * np.pi / 180)
+
+ds = ds[["lon", "lat", "Us", "Vs"]].expand_dims(dim={"depth": [0]})
+
+for var in ["lon", "lat"]:
+    ds[var] = ds[var].transpose("col", "row")
+
+ds["grid"] = xr.DataArray(
+        0,
+        attrs=parcels._sgrid.SGrid2DMetadata(
+            cf_role="grid_topology",
+            topology_dimension=2,
+            node_dimensions=("row", "col"),
+            node_coordinates=("lon", "lat"),
+            face_dimensions=(
+                parcels._sgrid.FaceNodePadding("X", "row", parcels._sgrid.Padding.LOW),
+                parcels._sgrid.FaceNodePadding("Y", "col", parcels._sgrid.Padding.LOW),
+            ),
+            vertical_dimensions=(parcels._sgrid.FaceNodePadding("Z", "depth", parcels._sgrid.Padding.HIGH),),
+        ).to_attrs(),
+    )
+
+fieldset_wind = parcels.FieldSet.from_sgrid_conventions(ds, vector_fields={"UVStokes": ("Us", "Vs")})
+fieldset_wind = fieldset_wind.to_windowed_arrays()
+fieldset += fieldset_wind
+
 fieldset.describe()
-fieldset.to_windowed_arrays()
 
 #%% Create the simulation
 release = 'coast'  # 'coast' or 'off_shore'
 
 if release=='off_shore':
     lat0 = 52.10
-    lon0 = 3.52
+    lon0 = 3.7
 elif release=='coast':
     lat0 = 52.020000
     lon0 = 4.097500
@@ -87,8 +131,23 @@ def DeleteAnyError(particles, fieldset):
     any_error = particles.state >= 50  # This captures all Errors
     particles[any_error].state = parcels.StatusCode.Delete
 
+
+def AdvectionRK2(particles, fieldset):  # pragma: no cover
+    """Advection of particles using second-order Runge-Kutta integration."""
+
+    (u1, v1) = fieldset.UV[particles]
+    (us1, vs1) = fieldset.UVStokes[particles]
+    x1 = particles.x + (u1 + us1) * 0.5 * particles.dt
+    y1 = particles.y + (v1 + vs1) * 0.5 * particles.dt
+
+    (u2, v2) = fieldset.UV[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
+    (us2, vs2) = fieldset.UVStokes[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
+    particles.dx += (u2 + us2) * particles.dt
+    particles.dy += (v2 + vs2) * particles.dt
+
+
 pset.execute(
-    [parcels.kernels.AdvectionRK2, DeleteAnyError],
+    [AdvectionRK2, DeleteAnyError],
     runtime=np.timedelta64(14, "D"),
     dt=np.timedelta64(10, "m"),
     output_file=output_file,
