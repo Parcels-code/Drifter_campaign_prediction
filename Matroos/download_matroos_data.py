@@ -25,6 +25,8 @@ times = np.arange(np.datetime64('2025-11-01T00:00'), np.datetime64('2025-12-01T0
 for t in times:
     for product, (product_name, is_hindcast) in PRODUCTS.items():
         dirname = os.path.join(DIR, product)
+        if product == "flow":
+            dirname = os.path.join(dirname, "raw")
         filename = os.path.join(dirname, f"{product_name}_{t.astype('datetime64[m]').astype(str).replace('T', '').replace(':', '').replace('-', '')}.nc")
         print(filename)
         if not os.path.exists(filename):
