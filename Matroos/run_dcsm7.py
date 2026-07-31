@@ -120,7 +120,11 @@ time = (
     + np.arange(0, nrepeat)[:, np.newaxis] * release_dt
 )
 print(f"Running {nrepeat} releases of {npart} particles each, for a total of {nrepeat*npart} particles.")
-pset = parcels.ParticleSet(fieldset, x=lon, y=lat, t=time)
+
+MatroosParticle = parcels.Particle.add_variable(
+    parcels.Variable("outside_stokes", dtype=np.int32, initial=0.)
+)
+pset = parcels.ParticleSet(fieldset, pclass=MatroosParticle, x=lon, y=lat, t=time)
 
 slurm_job_id = os.getenv("SLURM_JOB_ID", "local")
 output_name = f"output-matroos-{slurm_job_id}.parquet"
@@ -147,6 +151,15 @@ def AdvectionRK2(particles, fieldset):  # pragma: no cover
 
     (u2, v2) = fieldset.UV[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
     (us2, vs2) = fieldset.UVStokes[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
+
+    # Handle particles that are outside the Stokes drift field
+    outside_stokes = (us2==0) | (vs2==0)
+    us2[outside_stokes] = 0.0
+    vs2[outside_stokes] = 0.0
+    particles.state[outside_stokes] = parcels.StatusCode.Success
+    particles.outside_stokes[outside_stokes] = 1
+    particles.outside_stokes[~outside_stokes] = 0
+
     particles.dx += (u2 + us2) * particles.dt
     particles.dy += (v2 + vs2) * particles.dt
 
