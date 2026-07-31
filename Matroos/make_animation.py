@@ -1,5 +1,7 @@
 import matplotlib
 import matplotlib.pyplot as plt
+import glob
+import xarray as xr
 from matplotlib.animation import FuncAnimation, PillowWriter
 import matplotlib.tri as mtri
 import numpy as np
@@ -8,10 +10,14 @@ import polars as pl
 
 import parcels
 
+DIR = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie/"
+
 def make_animation(file, time_step=np.timedelta64(30, "m")):
     df = parcels.read_particlefile(file)
 
-    ds = parcels.open_raw_zarr("/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr")
+#%% Open flow files
+    files = sorted(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*"))
+    ds = xr.open_dataset(files[0])
     ds = ds.isel(time=0, zc=0)
     zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
     ds = ds.isel(n_face=(~zero_faces).values)
@@ -117,8 +123,9 @@ def make_animation(file, time_step=np.timedelta64(30, "m")):
 
 def make_plot(file):
     df = parcels.read_particlefile(file)
+    files = sorted(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*"))
+    ds = xr.open_dataset(files[0])
 
-    ds = parcels.open_raw_zarr("/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmony/maps2d_dcsm7_harmonie_combined.zarr")
     ds = ds.isel(time=0, zc=0)
     zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
     ds = ds.isel(n_face=(~zero_faces).values)
