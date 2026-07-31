@@ -6,14 +6,24 @@ import xarray as xr
 import uxarray as ux
 
 import parcels
-from parcels.interpolators._base import VectorInterpolator
 
 from make_animation import make_animation, make_plot
 
-#%% Open files
-input_file = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie_flow/maps2d_dcsm7_harmonie_combined_compressed.zarr"
+DIR = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie/"
+#%% Open flow files
+files = sorted(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*"))
 
-ds = parcels.open_raw_zarr(input_file)
+ds = xr.open_mfdataset(
+    files,
+    combine="nested",
+    concat_dim="time",
+    data_vars="minimal",
+    coords="minimal",
+    compat="override",
+    join="override",
+    parallel=True,
+    chunks={"time": 1},
+)
 
 uxgrid = ux.Grid.from_topology(
     node_lon=ds["Mesh_node_x"],
@@ -33,11 +43,7 @@ uxds = ux.UxDataset(
 fieldset = parcels.FieldSet.from_ugrid_conventions(uxds, mesh="spherical")
 
 #%% Add Stokes drift to the fieldset
-files = sorted(
-    glob.glob(
-        "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie_waves/maps2d_swan_kuststrook_harmonie_202510*.nc"
-    )
-)
+files = sorted(glob.glob(f"{DIR}/waves/swan_kuststrook_harmonie_*.nc"))
 
 ds = xr.open_mfdataset(
     files,
@@ -75,13 +81,13 @@ ds["grid"] = xr.DataArray(
     )
 
 fieldset_wind = parcels.FieldSet.from_sgrid_conventions(ds, vector_fields={"UVStokes": ("Us", "Vs")})
-fieldset_wind = fieldset_wind.to_windowed_arrays()
 fieldset += fieldset_wind
 
+fieldset = fieldset.to_windowed_arrays()
 fieldset.describe()
 
 #%% Create the simulation
-release = 'coast'  # 'coast' or 'off_shore'
+release = 'off_shore'  # 'coast' or 'off_shore'
 
 if release=='off_shore':
     lat0 = 52.10
@@ -103,9 +109,8 @@ for r in radii:
     lat.extend(lat0 + dlat)
     lon.extend(lon0 + dlon)
 
-# lon, lat = [4.466334, 4.374861, 4.500730],[51.899910, 51.898599, 51.917959]
-release_dt = np.timedelta64(1, "h")
-nrepeat = 12
+release_dt = np.timedelta64(12, "h")
+nrepeat = np.timedelta64(28, "D") // release_dt  # number of releases
 npart = len(lon)
 lon = np.broadcast_to(lon, (nrepeat, npart))
 lat = np.broadcast_to(lat, (nrepeat, npart))
@@ -148,7 +153,7 @@ def AdvectionRK2(particles, fieldset):  # pragma: no cover
 
 pset.execute(
     [AdvectionRK2, DeleteAnyError],
-    runtime=np.timedelta64(14, "D"),
+    endtime=fieldset.time_interval.right,
     dt=np.timedelta64(10, "m"),
     output_file=output_file,
 )
