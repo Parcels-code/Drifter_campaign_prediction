@@ -114,7 +114,7 @@ nrepeat = np.timedelta64(28, "D") // release_dt  # number of releases
 npart = len(lon)
 lon = np.broadcast_to(lon, (nrepeat, npart))
 lat = np.broadcast_to(lat, (nrepeat, npart))
-time_i = np.datetime64("2025-10-01T00:00:00")
+time_i = fieldset.time_interval.left
 time = (
     np.broadcast_to(time_i, (nrepeat, npart))
     + np.arange(0, nrepeat)[:, np.newaxis] * release_dt
