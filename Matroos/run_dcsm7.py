@@ -56,7 +56,7 @@ ds = xr.open_mfdataset(
     parallel=True,
     chunks={"time": 1},
 )
-Us = 8 * np.pi**3 * ds["wave_height_hm0"]**2 / (ds["wave_period_tm10"]**3 * 9.81)
+Us = 2 * np.pi**3 * ds["wave_height_hm0"]**2 / (ds["wave_period_tm10"]**3 * 9.81)
 ds["Us"] = Us * np.cos(ds["wave_dir_th0"] * np.pi / 180)
 ds["Vs"] = Us * np.sin(ds["wave_dir_th0"] * np.pi / 180)
 
