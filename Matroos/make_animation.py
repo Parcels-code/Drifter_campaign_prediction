@@ -221,4 +221,10 @@ def make_plot(file):
         traj = df.filter(pl.col("particle_id") == pid)
         lines = ax.plot(traj["x"], traj["y"], color=trajectory_to_color[pid], linewidth=0.6, alpha=0.3)
         ax.plot(traj["x"][-1], traj["y"][-1], marker="o", color=trajectory_to_color[pid], markersize=3)
+
+    t_values = df["t"].to_numpy()
+    t_str = pd.to_datetime(t_values.min()).strftime("%Y-%m-%d %H:%M:%S")
+    t_str_end = pd.to_datetime(t_values.max()).strftime("%Y-%m-%d %H:%M:%S")
+    title = ax.set_title(f"Particles between {t_str} and {t_str_end}")
+
     fig.savefig(file.replace(".parquet", ".png"), dpi=300)
