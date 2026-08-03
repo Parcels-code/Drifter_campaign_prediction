@@ -9,7 +9,7 @@ import parcels
 
 from make_animation import make_animation, make_plot
 
-DIR = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie/"
+DIR = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie"
 #%% Open flow files
 files = sorted(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*"))
 
@@ -80,7 +80,43 @@ ds["grid"] = xr.DataArray(
         ).to_attrs(),
     )
 
-fieldset_wind = parcels.FieldSet.from_sgrid_conventions(ds, vector_fields={"UVStokes": ("Us", "Vs")})
+fieldset_waves = parcels.FieldSet.from_sgrid_conventions(ds, vector_fields={"UVStokes": ("Us", "Vs")})
+fieldset += fieldset_waves
+
+
+#%% Add wind to the fieldset
+
+files = sorted(glob.glob(f"{DIR}/wind/knmi_harmonie*.nc"))
+
+ds = xr.open_mfdataset(
+    files,
+    combine="nested",
+    concat_dim="time",
+    data_vars="minimal",
+    coords="minimal",
+    compat="override",
+    join="override",
+    parallel=True,
+    chunks={"time": 1},
+)[["x", "y", "northward_wind", "eastward_wind"]].rename({'x': 'lon', 'y': 'lat'})
+ds["time"].attrs["axis"] = "T"
+
+ds["grid"] = xr.DataArray(
+        0,
+        attrs=parcels._sgrid.SGrid2DMetadata(
+            cf_role="grid_topology",
+            topology_dimension=2,
+            node_dimensions=("lon", "lat"),
+            node_coordinates=("lon", "lat"),
+            face_dimensions=(
+                parcels._sgrid.FaceNodePadding("X", "lon", parcels._sgrid.Padding.LOW),
+                parcels._sgrid.FaceNodePadding("Y", "lat", parcels._sgrid.Padding.LOW),
+            ),
+            vertical_dimensions=(parcels._sgrid.FaceNodePadding("Z", "depth", parcels._sgrid.Padding.HIGH),),
+        ).to_attrs(),
+    )
+
+fieldset_wind = parcels.FieldSet.from_sgrid_conventions(ds, vector_fields={"UVWind": ("eastward_wind", "northward_wind")})
 fieldset += fieldset_wind
 
 fieldset = fieldset.to_windowed_arrays()
@@ -88,6 +124,8 @@ fieldset.describe()
 
 #%% Create the simulation
 release = 'off_shore'  # 'coast' or 'off_shore'
+
+fieldset.windage = 0.01  # windage factor for the particles
 
 if release=='off_shore':
     lat0 = 52.10
@@ -146,11 +184,13 @@ def AdvectionRK2(particles, fieldset):  # pragma: no cover
 
     (u1, v1) = fieldset.UV[particles]
     (us1, vs1) = fieldset.UVStokes[particles]
-    x1 = particles.x + (u1 + us1) * 0.5 * particles.dt
-    y1 = particles.y + (v1 + vs1) * 0.5 * particles.dt
+    (uw1, vw1) = fieldset.UVWind[particles]
+    x1 = particles.x + (u1 + us1 + uw1 * fieldset.windage) * 0.5 * particles.dt
+    y1 = particles.y + (v1 + vs1 + vw1 * fieldset.windage) * 0.5 * particles.dt
 
     (u2, v2) = fieldset.UV[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
     (us2, vs2) = fieldset.UVStokes[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
+    (uw2, vw2) = fieldset.UVWind[particles.t + 0.5 * particles.dt, particles.z, y1, x1, particles]
 
     # Handle particles that are outside the Stokes drift field
     outside_stokes = (us2==0) | (vs2==0)
@@ -160,8 +200,8 @@ def AdvectionRK2(particles, fieldset):  # pragma: no cover
     particles.outside_stokes[outside_stokes] = 1
     particles.outside_stokes[~outside_stokes] = 0
 
-    particles.dx += (u2 + us2) * particles.dt
-    particles.dy += (v2 + vs2) * particles.dt
+    particles.dx += (u2 + us2 + uw2 * fieldset.windage) * particles.dt
+    particles.dy += (v2 + vs2 + vw2 * fieldset.windage) * particles.dt
 
 
 pset.execute(
