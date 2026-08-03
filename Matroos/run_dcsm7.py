@@ -200,6 +200,11 @@ def AdvectionRK2(particles, fieldset):  # pragma: no cover
     particles.outside_stokes[outside_stokes] = 1
     particles.outside_stokes[~outside_stokes] = 0
 
+    # set wind to zero for particles that are on land
+    on_land = (u2==0) & (v2==0)
+    uw2[on_land] = 0.0
+    vw2[on_land] = 0.0
+
     particles.dx += (u2 + us2 + uw2 * fieldset.windage) * particles.dt
     particles.dy += (v2 + vs2 + vw2 * fieldset.windage) * particles.dt
 
