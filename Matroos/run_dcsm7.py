@@ -5,6 +5,7 @@ import numpy as np
 import xarray as xr
 import uxarray as ux
 
+import copernicusmarine
 import parcels
 
 from make_animation import make_animation, make_plot
@@ -86,36 +87,20 @@ fieldset += fieldset_waves
 
 #%% Add wind to the fieldset
 
-files = sorted(glob.glob(f"{DIR}/wind/knmi_harmonie*.nc"))
-
-ds = xr.open_mfdataset(
-    files,
-    combine="nested",
-    concat_dim="time",
-    data_vars="minimal",
-    coords="minimal",
-    compat="override",
-    join="override",
-    parallel=True,
-    chunks={"time": 1},
-)[["x", "y", "northward_wind", "eastward_wind"]].rename({'x': 'lon', 'y': 'lat'})
-ds["time"].attrs["axis"] = "T"
-
-ds["grid"] = xr.DataArray(
-        0,
-        attrs=parcels._sgrid.SGrid2DMetadata(
-            cf_role="grid_topology",
-            topology_dimension=2,
-            node_dimensions=("lon", "lat"),
-            node_coordinates=("lon", "lat"),
-            face_dimensions=(
-                parcels._sgrid.FaceNodePadding("X", "lon", parcels._sgrid.Padding.LOW),
-                parcels._sgrid.FaceNodePadding("Y", "lat", parcels._sgrid.Padding.LOW),
-            ),
-            vertical_dimensions=(parcels._sgrid.FaceNodePadding("Z", "depth", parcels._sgrid.Padding.HIGH),),
-        ).to_attrs(),
-    )
-
+startdate = np.datetime64("2025-11-01T00:00:00")
+enddate = np.datetime64("2025-12-01T00:00:00")
+ds = copernicusmarine.open_dataset(
+    dataset_id="cmems_obs-wind_glo_phy_my_l4_0.125deg_PT1H",
+    variables=["eastward_wind", "northward_wind"],
+    minimum_longitude=1,
+    maximum_longitude=8,
+    minimum_latitude=51,
+    maximum_latitude=55,
+    start_datetime=np.datetime_as_string(startdate, unit="s"),
+    end_datetime=np.datetime_as_string(enddate, unit="s"),
+)
+ds = parcels.convert.copernicusmarine_to_sgrid(fields={"eastward_wind": ds["eastward_wind"], "northward_wind": ds["northward_wind"]})
+ds.load()  # Data is mall enough to load into memory
 fieldset_wind = parcels.FieldSet.from_sgrid_conventions(ds, vector_fields={"UVWind": ("eastward_wind", "northward_wind")})
 fieldset += fieldset_wind
 
