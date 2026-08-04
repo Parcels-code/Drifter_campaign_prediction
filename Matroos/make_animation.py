@@ -36,7 +36,7 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
         time_step,
     )
 
-    timerange = timerange[::frame_stride]  # default: every 3 hours for animation speed
+    trange_stride = timerange[::frame_stride]  # default: every 3 hours for animation speed
 
     # Build a color map by release time (all particles released together share a color).
     release_time_by_pid = df.group_by("particle_id").agg(
@@ -54,62 +54,38 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
         for row in release_time_by_pid.iter_rows(named=True)
     }
 
-    # Precompute frame data once; this avoids scanning/filtering the dataframe at every frame.
-    grouped = df.group_by("t", maintain_order=True).agg(
-        [
-            pl.col("x").alias("x"),
-            pl.col("y").alias("y"),
-            pl.col("particle_id").alias("particle_id"),
-        ]
-    )
-    frame_lookup = {}
-    for row in grouped.iter_rows(named=True):
-        offsets = np.column_stack((np.asarray(row["x"]), np.asarray(row["y"])))
-        colors = np.asarray([trajectory_to_color[p] for p in row["particle_id"]])
-        frame_lookup[np.datetime64(row["t"], "ns")] = (offsets, colors)
-
-    # Precompute each particle trajectory once so trail updates only slice numpy arrays.
-    trajectories = {}
-    for row in (
-        df.sort(["particle_id", "t"])
-        .group_by("particle_id", maintain_order=True)
-        .agg([
-            pl.col("t").alias("t"),
-            pl.col("x").alias("x"),
-            pl.col("y").alias("y"),
-        ])
-        .iter_rows(named=True)
-    ):
-        trajectories[row["particle_id"]] = (
-            np.asarray(row["t"], dtype="datetime64[ns]"),
-            np.asarray(row["x"]),
-            np.asarray(row["y"]),
-        )
-
     # figure setup
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set_xlim([df["x"].min(), df["x"].max()])
     ax.set_ylim([df["y"].min(), df["y"].max()])
     ax.triplot(triang, color="k", lw=0.2, alpha=0.35)
 
-    # --> plot first timestep
-    first_frame = frame_lookup.get(np.datetime64(timerange[0], "ns"))
-    if first_frame is None:
-        first_offsets = np.empty((0, 2))
-        first_colors = np.empty((0, 4))
-    else:
-        first_offsets, first_colors = first_frame
-
-    scatter = ax.scatter(
-        first_offsets[:, 0],
-        first_offsets[:, 1],
-        s=10,
-        c=first_colors,
-        zorder=10,
-    )
-
     trail_collection = LineCollection([], linewidths=0.6, alpha=0.3)
     ax.add_collection(trail_collection)
+
+    # Convert the trajectory data to a time-by-particle array.
+    particle_ids = df["particle_id"].unique().to_list()
+    x = np.full((len(timerange), len(particle_ids)), np.nan)
+    y = np.full((len(timerange), len(particle_ids)), np.nan)
+
+    for ti, t in enumerate(timerange):
+        frame = df.filter(pl.col("t") == pl.lit(t)).sort("particle_id")
+        for row in frame.iter_rows(named=True):
+            pi = particle_ids.index(row["particle_id"])
+            x[ti, pi] = row["x"]
+            y[ti, pi] = row["y"]
+
+    # Precompute colors for each particle column.
+    colors = np.asarray([trajectory_to_color[pid] for pid in particle_ids])
+
+    # Plot first timestep
+    scatter = ax.scatter(
+        x[0, :],
+        y[0, :],
+        s=10,
+        c=colors,
+        zorder=10,
+    )
 
     # Set initial title
     t_str = pd.to_datetime(timerange[0]).strftime("%Y-%m-%d %H:%M:%S")
@@ -117,42 +93,29 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
 
     # loop over for animation
     def animate(i):
-        t_str = pd.to_datetime(timerange[i]).strftime("%Y-%m-%d %H:%M:%S")
+        t_str = pd.to_datetime(trange_stride[i]).strftime("%Y-%m-%d %H:%M:%S")
+        I = np.where(timerange == trange_stride[i])[0][0]
         title.set_text(f"Particles on {t_str}")
 
-        frame = frame_lookup.get(np.datetime64(timerange[i], "ns"))
-        if frame is not None:
-            offsets, colors = frame
-            scatter.set_offsets(offsets)
-            scatter.set_color(colors)
-        else:
-            scatter.set_offsets(np.empty((0, 2)))
-            scatter.set_color(np.empty((0, 4)))
+        scatter.set_offsets(np.column_stack((x[I, :], y[I, :])))
 
-        trail_length = min(10, i)  # trails will have max length of 10 time steps
+        trail_length = min(10, I)  # trails will have max length of 10 time steps
         if trail_length > 0:
-            start_time = np.datetime64(timerange[max(0, i - trail_length)], "ns")
-            end_time = np.datetime64(timerange[i], "ns")
-            trail_segments = []
-            trail_colors = []
-
-            for pid, (times, xs, ys) in trajectories.items():
-                start_idx = np.searchsorted(times, start_time, side="left")
-                end_idx = np.searchsorted(times, end_time, side="right")
-                if end_idx - start_idx > 1:
-                    trail_segments.append(np.column_stack((xs[start_idx:end_idx], ys[start_idx:end_idx])))
-                    trail_colors.append(trajectory_to_color[pid])
-
+            start = max(0, I - trail_length)
+            x_slice = x[start : I + 1, :]
+            y_slice = y[start : I + 1, :]
+            trail_segments = np.stack((x_slice, y_slice), axis=-1).transpose(1, 0, 2)
             trail_collection.set_segments(trail_segments)
-            trail_collection.set_color(trail_colors)
+            trail_collection.set_color(colors)
         else:
             trail_collection.set_segments([])
+            trail_collection.set_color([])
 
         return scatter, title, trail_collection
 
 
     # Create animation
-    n_frames = len(timerange)
+    n_frames = len(trange_stride)
     anim = FuncAnimation(fig, animate, frames=n_frames, interval=100, blit=True)
 
     if show_progress and tqdm is not None:
