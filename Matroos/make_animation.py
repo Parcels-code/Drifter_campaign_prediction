@@ -60,32 +60,35 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
     ax.set_ylim([df["y"].min(), df["y"].max()])
     ax.triplot(triang, color="k", lw=0.2, alpha=0.35)
 
-    trail_collection = LineCollection([], linewidths=0.6, alpha=0.3)
-    ax.add_collection(trail_collection)
+    trails = LineCollection([], linewidths=0.6, alpha=0.3)
+    ax.add_collection(trails)
 
     # Convert the trajectory data to a time-by-particle array.
     particle_ids = df["particle_id"].unique().to_list()
-    x = np.full((len(timerange), len(particle_ids)), np.nan)
-    y = np.full((len(timerange), len(particle_ids)), np.nan)
+    x = np.full((len(particle_ids), len(timerange)), np.nan)
+    y = np.full((len(particle_ids), len(timerange)), np.nan)
 
-    for ti, t in enumerate(timerange):
-        frame = df.filter(pl.col("t") == pl.lit(t)).sort("particle_id")
-        for row in frame.iter_rows(named=True):
-            pi = particle_ids.index(row["particle_id"])
-            x[ti, pi] = row["x"]
-            y[ti, pi] = row["y"]
+    traj = df.with_columns(
+        pl.col("particle_id")
+        .replace(particle_ids, range(len(particle_ids)))
+        .alias("p_idx"),
+        pl.int_range(pl.len())
+        .alias("row_idx"),
+    )
+
+    # Map each observation to its nearest animation time index.
+    traj = traj.with_columns(
+        pl.Series("t_idx", np.searchsorted(timerange, traj["t"].to_numpy())).alias("t_idx")
+    )
+
+    x[traj["p_idx"].to_numpy(), traj["t_idx"].to_numpy()] = traj["x"].to_numpy()
+    y[traj["p_idx"].to_numpy(), traj["t_idx"].to_numpy()] = traj["y"].to_numpy()
 
     # Precompute colors for each particle column.
     colors = np.asarray([trajectory_to_color[pid] for pid in particle_ids])
 
     # Plot first timestep
-    scatter = ax.scatter(
-        x[0, :],
-        y[0, :],
-        s=10,
-        c=colors,
-        zorder=10,
-    )
+    scatter = ax.scatter(x[:, 0], y[:, 0], s=10, c=colors, zorder=10)
 
     # Set initial title
     t_str = pd.to_datetime(timerange[0]).strftime("%Y-%m-%d %H:%M:%S")
@@ -94,29 +97,26 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
     # loop over for animation
     def animate(i):
         t_str = pd.to_datetime(trange_stride[i]).strftime("%Y-%m-%d %H:%M:%S")
-        I = np.where(timerange == trange_stride[i])[0][0]
         title.set_text(f"Particles on {t_str}")
 
-        scatter.set_offsets(np.column_stack((x[I, :], y[I, :])))
+        I = np.where(timerange == trange_stride[i])[0][0]
+        scatter.set_offsets(np.column_stack((x[:, I], y[:, I])))
 
         trail_length = min(10, I)  # trails will have max length of 10 time steps
         if trail_length > 0:
             start = max(0, I - trail_length)
-            x_slice = x[start : I + 1, :]
-            y_slice = y[start : I + 1, :]
-            trail_segments = np.stack((x_slice, y_slice), axis=-1).transpose(1, 0, 2)
-            trail_collection.set_segments(trail_segments)
-            trail_collection.set_color(colors)
+            x_slice = x[:, start : I + 1]
+            y_slice = y[:, start : I + 1]
+            trails.set_segments(np.dstack((x_slice, y_slice)))
+            trails.set_color(colors)
         else:
-            trail_collection.set_segments([])
-            trail_collection.set_color([])
-
-        return scatter, title, trail_collection
+            trails.set_segments([])
+            trails.set_color([])
 
 
     # Create animation
     n_frames = len(trange_stride)
-    anim = FuncAnimation(fig, animate, frames=n_frames, interval=100, blit=True)
+    anim = FuncAnimation(fig, animate, frames=n_frames, interval=100)
 
     if show_progress and tqdm is not None:
         with tqdm(total=n_frames, desc="Rendering GIF", unit="frame") as pbar:
