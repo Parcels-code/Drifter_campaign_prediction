@@ -1,5 +1,6 @@
 import matplotlib
 import matplotlib.pyplot as plt
+import time
 import glob
 import xarray as xr
 from matplotlib.animation import FuncAnimation, PillowWriter
@@ -10,6 +11,8 @@ import pandas as pd
 import polars as pl
 from tqdm.auto import tqdm
 
+import copernicusmarine
+
 import parcels
 
 DIR = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie/"
@@ -18,17 +21,12 @@ DIR = "/storage/shared/oceanparcels/input_data/MatroosWaddenSea/DCSMv7_harmonie/
 def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=10, show_progress=True):
     df = parcels.read_particlefile(file)
 
-    files = sorted(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*"))
-    ds = xr.open_dataset(files[0])
-    ds = ds.isel(time=0, zc=0)
-    zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
-    ds = ds.isel(n_face=(~zero_faces).values)
+    fig, ax = setup_plot(
+        xlim=[df["x"].min(), df["x"].max()],
+        ylim=[df["y"].min(), df["y"].max()]
+    )
 
-    triang = mtri.Triangulation(
-        ds["Mesh_node_x"].data,
-        ds["Mesh_node_y"].data,
-        triangles=ds["tri_face_nodes"].data)
-
+    tic = time.time()
     t_values = df["t"].to_numpy()
     timerange = np.arange(
         t_values.min(),
@@ -53,12 +51,6 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
         row["particle_id"]: release_to_color[row["release_time"]]
         for row in release_time_by_pid.iter_rows(named=True)
     }
-
-    # figure setup
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.set_xlim([df["x"].min(), df["x"].max()])
-    ax.set_ylim([df["y"].min(), df["y"].max()])
-    ax.triplot(triang, color="k", lw=0.2, alpha=0.35)
 
     trails = LineCollection([], linewidths=0.6, alpha=0.3)
     ax.add_collection(trails)
@@ -137,23 +129,19 @@ def make_animation(file, time_step=np.timedelta64(30, "m"), frame_stride=6, fps=
                 pbar.update(n_frames - pbar.n)
     else:
         anim.save(file.replace(".parquet", ".gif"), writer=PillowWriter(fps=fps))
-    return anim
+
+    print(f"making animation took {time.time() - tic:.2f} seconds")
 
 
 def make_plot(file):
     df = parcels.read_particlefile(file)
-    files = sorted(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*"))
-    ds = xr.open_dataset(files[0])
 
-    ds = ds.isel(time=0, zc=0)
-    zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
-    ds = ds.isel(n_face=(~zero_faces).values)
+    fig, ax = setup_plot(
+        xlim=[df["x"].min(), df["x"].max()],
+        ylim=[df["y"].min(), df["y"].max()]
+    )
 
-    triang = mtri.Triangulation(
-        ds["Mesh_node_x"].data,
-        ds["Mesh_node_y"].data,
-        triangles=ds["tri_face_nodes"].data)
-
+    tic = time.time()
     # Build a color map by release time (all particles released together share a color).
     release_time_by_pid = df.group_by("particle_id").agg(
         pl.col("t").min().alias("release_time")
@@ -170,12 +158,6 @@ def make_plot(file):
         for row in release_time_by_pid.iter_rows(named=True)
     }
 
-    # figure setup
-    fig, ax = plt.subplots(figsize=(8, 5))
-    ax.set_xlim([df["x"].min(), df["x"].max()])
-    ax.set_ylim([df["y"].min(), df["y"].max()])
-    ax.triplot(triang, color="k", lw=0.2, alpha=0.35)
-
     pids = np.array(df["particle_id"].unique())
     rng = np.random.default_rng(1636)
     rng.shuffle(pids)
@@ -183,7 +165,7 @@ def make_plot(file):
     for pid in pids:
         traj = df.filter(pl.col("particle_id") == pid)
         lines = ax.plot(traj["x"], traj["y"], color=trajectory_to_color[pid], linewidth=0.6, alpha=0.3)
-        ax.plot(traj["x"][-1], traj["y"][-1], marker="o", color=trajectory_to_color[pid], markersize=3)
+        ax.plot(traj["x"][-1], traj["y"][-1], marker="o", color=trajectory_to_color[pid], markersize=3, zorder=4)
 
     t_values = df["t"].to_numpy()
     t_str = pd.to_datetime(t_values.min()).strftime("%Y-%m-%d %H:%M:%S")
@@ -191,3 +173,55 @@ def make_plot(file):
     title = ax.set_title(f"Particles between {t_str} and {t_str_end}")
 
     fig.savefig(file.replace(".parquet", ".png"), dpi=300)
+    print(f"make_plot took {time.time() - tic:.2f} seconds")
+
+
+def setup_plot(xlim, ylim):
+    tic = time.time()
+    ds = xr.open_dataset(glob.glob(f"{DIR}/flow/dcsm_fm100m_harmonie_*")[0]).isel(time=0, zc=0)
+    zero_faces = (ds["U"] == 0) & (ds["V"] == 0)
+    ds = ds.isel(n_face=(~zero_faces).values)
+
+    triang = mtri.Triangulation(
+        ds["Mesh_node_x"].data,
+        ds["Mesh_node_y"].data,
+        triangles=ds["tri_face_nodes"].data)
+
+    ds_waves = xr.open_dataset(glob.glob(f"{DIR}/waves/swan_kuststrook_harmonie_*.nc")[0])
+
+    ds_wind = copernicusmarine.open_dataset(
+        dataset_id="cmems_obs-wind_glo_phy_my_l4_0.125deg_PT1H",
+        variables=["eastward_wind"],
+        minimum_longitude=1,
+        maximum_longitude=8,
+        minimum_latitude=51,
+        maximum_latitude=55,
+        start_datetime="2024-01-01T00:00:00Z",
+        end_datetime="2024-01-01T00:00:00Z",
+    )
+
+    # figure setup
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
+
+    for j in range(ds_waves["lon"].values.shape[1]):
+        label = "Waves mesh" if j == 0 else None
+        ax.plot(ds_waves["lon"].values[:, j], ds_waves["lat"].values[:, j], color="b", lw=0.3, alpha=0.5, label=label)
+    for i in range(ds_waves["lon"].values.shape[0]):
+        ax.plot(ds_waves["lon"].values[i, :], ds_waves["lat"].values[i, :], color="b", lw=0.3, alpha=0.5)
+
+    for j in range(ds_wind["latitude"].values.shape[0]):
+        label = "Wind mesh" if j == 0 else None
+        ax.hlines(ds_wind["latitude"].values[j], xmin=ds_wind["longitude"].values.min(), xmax=ds_wind["longitude"].values.max(), color="r", lw=0.3, alpha=0.5, label=label, zorder=0)
+    for i in range(ds_wind["longitude"].values.shape[0]):
+        ax.vlines(ds_wind["longitude"].values[i], ymin=ds_wind["latitude"].values.min(), ymax=ds_wind["latitude"].values.max(), color="r", lw=0.3, alpha=0.5, zorder=1)
+
+    ax.triplot(triang, color="k", lw=0.3, alpha=0.5, label="Flow mesh", zorder=2)
+
+    ax.legend(loc="lower right", fontsize=8)
+    ax.set_aspect("equal", adjustable="box")
+
+    print(f"setup_plot took {time.time() - tic:.2f} seconds")
+
+    return fig, ax
