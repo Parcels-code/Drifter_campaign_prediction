@@ -13,7 +13,7 @@ jupyter = "jupyter"
 JUPYTER_CONFIG_DIR = ".jupyter"
 
 [dependencies]
-parcels = { git = "https://github.com/erikvansebille/parcels/", rev="support_nan_coords_in_hastable"}
+parcels = { git = "https://github.com/Parcels-Code/parcels/"}
 # parcels = ">=4.0.0alpha2142,<5"
 ipykernel = ">=7.2.0,<8"
 jupyter = ">=1.1.1,<2"
